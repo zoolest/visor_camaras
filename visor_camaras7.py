@@ -1,4 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON INTERFAZ MEJORADA (SIN ICONOS) ---
+# --- VERSIÓN CON DOBLE CLIC PARA ENTRAR A PANTALLA COMPLETA ---
 
 import cv2
 import tkinter as tk
@@ -120,14 +121,14 @@ class CameraViewerApp:
 
         self.back_to_grid_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
         self.back_to_grid_button.pack(side="left", padx=5)
-        Tooltip(self.back_to_grid_button, "Volver a la vista de múltiples cámaras (Doble Clic o Esc)")
+        Tooltip(self.back_to_grid_button, "Volver a la vista de múltiples cámaras (Esc)")
 
         self.enter_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
         self.enter_true_fullscreen_button.pack(side="left", padx=5)
-        Tooltip(self.enter_true_fullscreen_button, "Ver esta cámara en pantalla completa real")
+        Tooltip(self.enter_true_fullscreen_button, "Ver esta cámara en pantalla completa real (Doble Clic)")
 
         self.exit_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
-        Tooltip(self.exit_true_fullscreen_button, "Salir del modo de pantalla completa real (Esc)")
+        Tooltip(self.exit_true_fullscreen_button, "Salir del modo de pantalla completa real (Doble Clic o Esc)")
         
         self.running = True
         self.update_page_view()
@@ -136,19 +137,23 @@ class CameraViewerApp:
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.window.mainloop()
 
-    def enter_true_fullscreen(self):
+    def enter_true_fullscreen(self, event=None):
         self.true_fullscreen = True
         self.window.attributes('-fullscreen', True)
         self.back_to_grid_button.pack_forget()
         self.enter_true_fullscreen_button.pack_forget()
         self.exit_true_fullscreen_button.pack(side="left", padx=5)
+        # Re-vincular doble clic para que ahora salga de la pantalla completa real
+        self.fullscreen_canvas.bind("<Double-1>", self.exit_true_fullscreen)
 
-    def exit_true_fullscreen(self):
+    def exit_true_fullscreen(self, event=None):
         self.true_fullscreen = False
         self.window.attributes('-fullscreen', False)
         self.exit_true_fullscreen_button.pack_forget()
         self.back_to_grid_button.pack(side="left", padx=5)
         self.enter_true_fullscreen_button.pack(side="left", padx=5)
+        # Re-vincular doble clic para que ahora entre a la pantalla completa real
+        self.fullscreen_canvas.bind("<Double-1>", self.enter_true_fullscreen)
 
     def handle_escape(self, event=None):
         if self.true_fullscreen:
@@ -180,7 +185,9 @@ class CameraViewerApp:
         self.bottom_bar.pack_forget()
         self.fullscreen_frame.pack(fill="both", expand=True)
         
-        self.fullscreen_canvas.bind("<Double-1>", self.exit_fullscreen)
+        # --- CAMBIO CLAVE: El doble clic ahora entra a pantalla completa real ---
+        self.fullscreen_canvas.bind("<Double-1>", self.enter_true_fullscreen)
+        
         self.window.bind("<Escape>", self.handle_escape)
         self.window.bind("<Right>", self.next_camera_fullscreen)
         self.window.bind("<Left>", self.prev_camera_fullscreen)
@@ -195,6 +202,7 @@ class CameraViewerApp:
         self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
 
+        # Desvincular todos los eventos específicos de la vista completa
         self.fullscreen_canvas.unbind("<Double-1>")
         self.window.unbind("<Escape>")
         self.window.unbind("<Right>")
