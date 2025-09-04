@@ -1,5 +1,4 @@
-# --- VISOR MULTI-CÁMARA USANDO OpenCV (SIN AUDIO) ---
-# --- VERSIÓN CON NAVEGACIÓN EN PANTALLA COMPLETA ---
+# --- VISOR MULTI-CÁMARA CON INTERFAZ MEJORADA (SIN ICONOS) ---
 
 import cv2
 import tkinter as tk
@@ -10,6 +9,7 @@ import os
 import math
 import time
 from urllib.parse import urlparse
+import sv_ttk # Importar el tema
 
 # --- CONFIGURACIÓN GLOBAL ---
 CONFIG_FILE = "cameras.txt"
@@ -51,6 +51,33 @@ class SettingsDialog(tk.Toplevel):
     def save_and_close(self): self.result = list(self.listbox.get(0, tk.END)); self.destroy()
     def cancel(self): self.result = None; self.destroy()
 
+# --- Clase para Tooltips ---
+class Tooltip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip_window = None
+        widget.bind("<Enter>", self.show_tooltip)
+        widget.bind("<Leave>", self.hide_tooltip)
+
+    def show_tooltip(self, event):
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+
+        self.tooltip_window = tk.Toplevel(self.widget)
+        self.tooltip_window.wm_overrideredirect(True)
+        self.tooltip_window.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(self.tooltip_window, text=self.text, background="#333333", foreground="white", relief='solid', borderwidth=1,
+                         font=("Helvetica", 10, "normal"))
+        label.pack(ipadx=5, ipady=3)
+
+    def hide_tooltip(self, event):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+        self.tooltip_window = None
+
 # --- CLASE PRINCIPAL DE LA APLICACIÓN ---
 class CameraViewerApp:
     def __init__(self, window, window_title):
@@ -65,15 +92,23 @@ class CameraViewerApp:
         self.true_fullscreen = False
 
         top_bar = ttk.Frame(self.window); top_bar.pack(side="top", fill="x", padx=10, pady=5)
-        ttk.Button(top_bar, text="Administrar Cámaras", command=self.open_settings).pack(side="left")
+        settings_button = ttk.Button(top_bar, text="Administrar Cámaras", command=self.open_settings)
+        settings_button.pack(side="left")
+        Tooltip(settings_button, "Añadir, editar o eliminar cámaras de la lista")
 
         self.grid_frame = ttk.Frame(self.window); self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.camera_canvases = []
 
         self.bottom_bar = ttk.Frame(self.window); self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
-        self.prev_button = ttk.Button(self.bottom_bar, text="<< Anterior", command=self.prev_page); self.prev_button.pack(side="left")
+        self.prev_button = ttk.Button(self.bottom_bar, text="<< Anterior", command=self.prev_page)
+        self.prev_button.pack(side="left")
+        Tooltip(self.prev_button, "Ir a la página anterior")
+        
         self.page_label = ttk.Label(self.bottom_bar, text="Página 0 de 0", anchor="center"); self.page_label.pack(side="left", fill="x", expand=True)
-        self.next_button = ttk.Button(self.bottom_bar, text="Siguiente >>", command=self.next_page); self.next_button.pack(side="right")
+        
+        self.next_button = ttk.Button(self.bottom_bar, text="Siguiente >>", command=self.next_page)
+        self.next_button.pack(side="right")
+        Tooltip(self.next_button, "Ir a la siguiente página")
         
         self.fullscreen_frame = ttk.Frame(self.window)
         self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold")); self.fullscreen_label.pack(pady=(10,5))
@@ -85,11 +120,14 @@ class CameraViewerApp:
 
         self.back_to_grid_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
         self.back_to_grid_button.pack(side="left", padx=5)
+        Tooltip(self.back_to_grid_button, "Volver a la vista de múltiples cámaras (Doble Clic o Esc)")
 
         self.enter_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
         self.enter_true_fullscreen_button.pack(side="left", padx=5)
+        Tooltip(self.enter_true_fullscreen_button, "Ver esta cámara en pantalla completa real")
 
         self.exit_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
+        Tooltip(self.exit_true_fullscreen_button, "Salir del modo de pantalla completa real (Esc)")
         
         self.running = True
         self.update_page_view()
@@ -98,7 +136,6 @@ class CameraViewerApp:
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.window.mainloop()
 
-    # --- Métodos para la pantalla completa real ---
     def enter_true_fullscreen(self):
         self.true_fullscreen = True
         self.window.attributes('-fullscreen', True)
@@ -119,30 +156,25 @@ class CameraViewerApp:
         else:
             self.exit_fullscreen()
             
-    # --- CAMBIO 1: Nuevos métodos para cambiar de cámara ---
     def _update_fullscreen_info(self):
-        """Actualiza el texto de la etiqueta en la vista completa."""
         if self.fullscreen_camera_index is not None:
             camera_name = self._extract_name_from_url(self.all_camera_urls[self.fullscreen_camera_index], default_name=f"CÁMARA {self.fullscreen_camera_index+1}")
             self.fullscreen_label.config(text=f"{camera_name} - VISTA COMPLETA")
 
     def next_camera_fullscreen(self, event=None):
-        """Cambia a la siguiente cámara en la lista."""
         if self.num_total_cameras > 1:
             self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
             self._update_fullscreen_info()
 
     def prev_camera_fullscreen(self, event=None):
-        """Cambia a la cámara anterior en la lista."""
         if self.num_total_cameras > 1:
             self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
             self._update_fullscreen_info()
             
-    # --- Métodos de la aplicación principal (con modificaciones) ---
     def enter_fullscreen(self, global_index):
         self.fullscreen_mode = True
         self.fullscreen_camera_index = global_index
-        self._update_fullscreen_info() # Usamos el nuevo método para poner el texto
+        self._update_fullscreen_info()
         
         self.grid_frame.pack_forget()
         self.bottom_bar.pack_forget()
@@ -150,8 +182,6 @@ class CameraViewerApp:
         
         self.fullscreen_canvas.bind("<Double-1>", self.exit_fullscreen)
         self.window.bind("<Escape>", self.handle_escape)
-        
-        # --- CAMBIO 2: Vincular teclas de flecha ---
         self.window.bind("<Right>", self.next_camera_fullscreen)
         self.window.bind("<Left>", self.prev_camera_fullscreen)
 
@@ -167,12 +197,9 @@ class CameraViewerApp:
 
         self.fullscreen_canvas.unbind("<Double-1>")
         self.window.unbind("<Escape>")
-        
-        # --- CAMBIO 3: Desvincular teclas de flecha ---
         self.window.unbind("<Right>")
         self.window.unbind("<Left>")
 
-    # --- Resto de los métodos (sin cambios) ---
     def _extract_name_from_url(self, url, default_name="Cámara sin nombre"):
         try:
             parsed_url = urlparse(url)
@@ -241,6 +268,7 @@ class CameraViewerApp:
 
     def start_stream(self, global_index, url):
         if url and global_index not in self.active_streams:
+            self.latest_frames[global_index] = "connecting"
             cap = cv2.VideoCapture(url)
             if cap.isOpened():
                 thread_running_flag = [True]
@@ -262,25 +290,27 @@ class CameraViewerApp:
         if self.fullscreen_mode:
             frame = self.latest_frames.get(self.fullscreen_camera_index)
             canvas = self.fullscreen_canvas
+            canvas.delete("all")
             if frame is not None:
-                h, w, _ = frame.shape
-                canvas_w, canvas_h = canvas.winfo_width(), canvas.winfo_height()
-                if canvas_w > 1 and canvas_h > 1:
-                    scale = min(canvas_w / w, canvas_h / h)
-                    new_w, new_h = int(w * scale), int(h * scale)
-                    frame_resized = cv2.resize(frame, (new_w, new_h))
-                    frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                    img = Image.fromarray(frame_rgb)
-                    
-                    bg_image = Image.new('RGB', (canvas_w, canvas_h), 'black')
-                    offset = ((canvas_w - new_w) // 2, (canvas_h - new_h) // 2)
-                    bg_image.paste(img, offset)
-                    
-                    photo = ImageTk.PhotoImage(image=bg_image)
-                    canvas.create_image(0, 0, image=photo, anchor=tk.NW)
-                    canvas.image = photo
+                if isinstance(frame, str) and frame == "connecting":
+                    if canvas.winfo_width() > 1:
+                        canvas.create_text(canvas.winfo_width() // 2, canvas.winfo_height() // 2, text="Conectando...", fill="white", font=("Helvetica", 24))
+                else:
+                    h, w, _ = frame.shape
+                    canvas_w, canvas_h = canvas.winfo_width(), canvas.winfo_height()
+                    if canvas_w > 1 and canvas_h > 1:
+                        scale = min(canvas_w / w, canvas_h / h)
+                        new_w, new_h = int(w * scale), int(h * scale)
+                        frame_resized = cv2.resize(frame, (new_w, new_h))
+                        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                        img = Image.fromarray(frame_rgb)
+                        bg_image = Image.new('RGB', (canvas_w, canvas_h), 'black')
+                        offset = ((canvas_w - new_w) // 2, (canvas_h - new_h) // 2)
+                        bg_image.paste(img, offset)
+                        photo = ImageTk.PhotoImage(image=bg_image)
+                        canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+                        canvas.image = photo
             else:
-                canvas.delete("all")
                 if canvas.winfo_width() > 1:
                     canvas.create_text(canvas.winfo_width() // 2, canvas.winfo_height() // 2, text="Sin Señal", fill="white", font=("Helvetica", 24))
         else:
@@ -289,14 +319,17 @@ class CameraViewerApp:
                 global_index = start_index + i
                 if global_index < self.num_total_cameras:
                     frame = self.latest_frames.get(global_index)
+                    canvas.delete("all")
                     if frame is not None:
-                        frame_resized = cv2.resize(frame, (CANVAS_WIDTH, CANVAS_HEIGHT))
-                        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                        photo = ImageTk.PhotoImage(image=Image.fromarray(frame_rgb))
-                        canvas.create_image(0, 0, image=photo, anchor=tk.NW)
-                        canvas.image = photo
+                        if isinstance(frame, str) and frame == "connecting":
+                            canvas.create_text(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, text="Conectando...", fill="white", font=("Helvetica", 16))
+                        else:
+                            frame_resized = cv2.resize(frame, (CANVAS_WIDTH, CANVAS_HEIGHT))
+                            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                            photo = ImageTk.PhotoImage(image=Image.fromarray(frame_rgb))
+                            canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+                            canvas.image = photo
                     else:
-                        canvas.delete("all")
                         canvas.create_text(CANVAS_WIDTH // 2, CANVAS_HEIGHT // 2, text="Sin Señal", fill="white", font=("Helvetica", 16))
         
         if self.running:
@@ -343,5 +376,9 @@ class CameraViewerApp:
 # --- Punto de Entrada del Programa ---
 if __name__ == '__main__':
     root = tk.Tk()
+    
+    # Aplicar el tema moderno
+    sv_ttk.set_theme("dark")
+    
     root.geometry("1280x720")
     app = CameraViewerApp(root, "Visor de Cámaras Avanzado (OpenCV)")
