@@ -1,6 +1,0 @@
-rtsp://FAC_LaCalle:santi002@192.168.0.80:554/stream1
-rtsp://FAC_LaCalle2:santi002@192.168.0.204:554/stream1
-rtsp://FAC_ElGaraje2:santi002@192.168.0.164:554/stream1
-rtsp://FAC_Ojo:santi002@192.168.0.104:554/stream2
-rtsp://FAC_Puerta:santi002@192.168.0.229:554/stream1
-rtsp://FAC_ElGaraje:santi002@192.168.0.103:554/stream1

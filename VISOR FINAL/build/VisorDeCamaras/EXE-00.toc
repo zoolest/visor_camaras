@@ -42,6 +42,12 @@
   ('pyi_rth_inspect',
    '/home/salvador/.local/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth_inspect.py',
    'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   '/home/salvador/.local/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   '/home/salvador/.local/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
   ('pyi_rth__tkinter',
    '/home/salvador/.local/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth__tkinter.py',
    'PYSOURCE'),
@@ -51,8 +57,8 @@
  [],
  False,
  False,
- 1757015442,
+ 1757021316,
  [('run',
    '/home/salvador/.local/lib/python3.12/site-packages/PyInstaller/bootloader/Linux-64bit-intel/run',
    'EXECUTABLE')],
- '/lib/x86_64-linux-gnu/libpython3.12.so')
+ '/lib/x86_64-linux-gnu/libpython3.12.so.1.0')
