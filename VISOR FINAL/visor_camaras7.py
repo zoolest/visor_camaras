@@ -1,5 +1,4 @@
-# --- VISOR MULTI-CÁMARA CON AUDIO SELECTIVO (VLC) ---
-# --- VERSIÓN FINAL SIN DEPENDENCIAS DE ICONOS ---
+# --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -47,7 +46,6 @@ class SettingsDialog(tk.Toplevel):
     def save_and_close(self): self.result = list(self.listbox.get(0, tk.END)); self.destroy()
     def cancel(self): self.result = None; self.destroy()
 
-
 # --- CLASE PRINCIPAL DE LA APLICACIÓN ---
 class CameraViewerApp:
     def __init__(self, window, window_title):
@@ -58,15 +56,15 @@ class CameraViewerApp:
         
         self.active_players = {}
         self.audio_buttons = {}
+        self.num_total_cameras = len(self.all_camera_urls)
         
         self.audio_source_index = None
-
         self.current_page = 0
         self.total_pages = 0
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
+        self.true_fullscreen = False
 
-        # Instancia de VLC (Compatible con Windows/Linux)
         self.vlc_instance = vlc.Instance("--quiet")
         
         # --- UI (Interfaz de Usuario) ---
@@ -80,10 +78,22 @@ class CameraViewerApp:
         self.page_label = ttk.Label(self.bottom_bar, text="Página 0 de 0", anchor="center"); self.page_label.pack(side="left", fill="x", expand=True)
         self.next_button = ttk.Button(self.bottom_bar, text="Siguiente >>", command=self.next_page); self.next_button.pack(side="right")
         
-        self.fullscreen_frame = tk.Frame(self.window, bg="black")
-        self.fullscreen_video_frame = tk.Frame(self.fullscreen_frame, bg="black")
-        self.fullscreen_video_frame.pack(fill="both", expand=True)
-        ttk.Button(self.fullscreen_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen).pack(pady=10)
+        # --- Frame para la vista de cámara única ---
+        self.fullscreen_frame = ttk.Frame(self.window)
+        self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold")); self.fullscreen_label.pack(pady=(10,5))
+        self.fullscreen_video_frame = tk.Frame(self.fullscreen_frame, bg="black", cursor="hand2")
+        self.fullscreen_video_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        fullscreen_button_frame = ttk.Frame(self.fullscreen_frame)
+        fullscreen_button_frame.pack(pady=10)
+
+        self.back_to_grid_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
+        self.back_to_grid_button.pack(side="left", padx=5)
+
+        self.enter_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
+        self.enter_true_fullscreen_button.pack(side="left", padx=5)
+
+        self.exit_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
         
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
@@ -95,8 +105,8 @@ class CameraViewerApp:
         
         self.audio_buttons.clear()
 
-        num_total_cameras = len(self.all_camera_urls)
-        self.total_pages = math.ceil(num_total_cameras / CAMS_PER_PAGE) if num_total_cameras > 0 else 1
+        self.num_total_cameras = len(self.all_camera_urls)
+        self.total_pages = math.ceil(self.num_total_cameras / CAMS_PER_PAGE) if self.num_total_cameras > 0 else 1
         
         self.current_page = max(0, min(self.current_page, self.total_pages - 1))
 
@@ -119,92 +129,136 @@ class CameraViewerApp:
             pane.grid_rowconfigure(0, weight=1)
             pane.grid_columnconfigure(0, weight=1)
 
-            if global_index < num_total_cameras:
+            if global_index < self.num_total_cameras:
                 url = self.all_camera_urls[global_index]
                 pane.config(text=self._extract_name_from_url(url, default_name=f"Cámara {global_index+1}"))
                 
-                video_frame = tk.Frame(pane, bg="black")
+                video_frame = tk.Frame(pane, bg="black", cursor="hand2")
                 video_frame.grid(row=0, column=0, sticky="nsew")
                 
-                # CAMBIO: Botón de audio con texto/emoji en lugar de icono
                 audio_button = ttk.Button(pane, text="🔇", width=3, command=lambda idx=global_index: self.toggle_audio_for_camera(idx))
                 audio_button.place(x=5, y=5, anchor="nw")
                 self.audio_buttons[global_index] = audio_button
                 
                 video_frame.bind("<Double-1>", lambda e, idx=global_index: self.enter_fullscreen(idx))
-
                 self.start_stream(global_index, url, video_frame)
     
     def start_stream(self, global_index, url, frame_widget):
         if global_index in self.active_players: return
-
         player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(url)
         media.add_option(':rtsp-tcp')
         player.set_media(media)
-        
         player.set_hwnd(frame_widget.winfo_id())
-        
         player.audio_set_mute(True)
-        
         player.play()
         self.active_players[global_index] = player
 
     def toggle_audio_for_camera(self, global_index):
-        # Si hay una cámara sonando actualmente, la muteamos primero
         if self.audio_source_index is not None and self.audio_source_index in self.active_players:
-            current_player = self.active_players[self.audio_source_index]
-            current_player.audio_set_mute(True)
+            self.active_players[self.audio_source_index].audio_set_mute(True)
             if self.audio_source_index in self.audio_buttons:
-                # CAMBIO: Actualizar el texto del botón a "muteado"
                 self.audio_buttons[self.audio_source_index].config(text="🔇")
 
-        # Si el usuario hizo clic en la misma cámara que ya sonaba, la dejamos muteada.
         if self.audio_source_index == global_index:
             self.audio_source_index = None
             return
 
-        # Activamos el audio de la nueva cámara seleccionada
         if global_index in self.active_players:
-            new_player = self.active_players[global_index]
-            new_player.audio_set_mute(False)
+            self.active_players[global_index].audio_set_mute(False)
             self.audio_source_index = global_index
             if global_index in self.audio_buttons:
-                # CAMBIO: Actualizar el texto del botón a "sonando"
                 self.audio_buttons[global_index].config(text="🔊")
-    
+
+    # --- Métodos de Navegación y Pantalla Completa ---
     def enter_fullscreen(self, global_index):
         if not global_index in self.active_players: return
         self.fullscreen_mode = True
         self.fullscreen_camera_index = global_index
+        self._update_fullscreen_info()
         
         self.grid_frame.pack_forget()
         self.bottom_bar.pack_forget()
         self.fullscreen_frame.pack(fill="both", expand=True)
         
-        player = self.active_players[global_index]
-        player.set_hwnd(self.fullscreen_video_frame.winfo_id())
+        self.active_players[global_index].set_hwnd(self.fullscreen_video_frame.winfo_id())
+        
+        self.fullscreen_video_frame.bind("<Double-1>", self.enter_true_fullscreen)
+        self.window.bind("<Escape>", self.handle_escape)
+        self.window.bind("<Right>", self.next_camera_fullscreen)
+        self.window.bind("<Left>", self.prev_camera_fullscreen)
 
     def exit_fullscreen(self, event=None):
+        if self.true_fullscreen: self.exit_true_fullscreen()
         if self.fullscreen_camera_index is None: return
 
-        # Lógica para encontrar el frame original y devolver el video
         children = self.grid_frame.winfo_children()
         on_page_index = self.fullscreen_camera_index % CAMS_PER_PAGE
         
         if on_page_index < len(children):
             original_container = children[on_page_index]
             original_video_frame = original_container.winfo_children()[0]
-            player = self.active_players[self.fullscreen_camera_index]
-            player.set_hwnd(original_video_frame.winfo_id())
+            self.active_players[self.fullscreen_camera_index].set_hwnd(original_video_frame.winfo_id())
         
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
-        
         self.fullscreen_frame.pack_forget()
         self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
         
+        self.fullscreen_video_frame.unbind("<Double-1>")
+        self.window.unbind("<Escape>")
+        self.window.unbind("<Right>")
+        self.window.unbind("<Left>")
+
+    def enter_true_fullscreen(self, event=None):
+        self.true_fullscreen = True
+        self.window.attributes('-fullscreen', True)
+        self.back_to_grid_button.pack_forget()
+        self.enter_true_fullscreen_button.pack_forget()
+        self.exit_true_fullscreen_button.pack(side="left", padx=5)
+        self.fullscreen_video_frame.bind("<Double-1>", self.exit_true_fullscreen)
+
+    def exit_true_fullscreen(self, event=None):
+        self.true_fullscreen = False
+        self.window.attributes('-fullscreen', False)
+        self.exit_true_fullscreen_button.pack_forget()
+        self.back_to_grid_button.pack(side="left", padx=5)
+        self.enter_true_fullscreen_button.pack(side="left", padx=5)
+        self.fullscreen_video_frame.bind("<Double-1>", self.enter_true_fullscreen)
+
+    def handle_escape(self, event=None):
+        if self.true_fullscreen:
+            self.exit_true_fullscreen()
+        else:
+            self.exit_fullscreen()
+            
+    def _update_fullscreen_info(self):
+        if self.fullscreen_camera_index is not None:
+            camera_name = self._extract_name_from_url(self.all_camera_urls[self.fullscreen_camera_index], default_name=f"CÁMARA {self.fullscreen_camera_index+1}")
+            self.fullscreen_label.config(text=f"{camera_name} - VISTA COMPLETA")
+
+    def next_camera_fullscreen(self, event=None):
+        if self.num_total_cameras > 1:
+            prev_player = self.active_players[self.fullscreen_camera_index]
+            self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
+            next_player = self.active_players[self.fullscreen_camera_index]
+            
+            prev_player.set_hwnd(0) # Liberar el frame
+            next_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
+            self._update_fullscreen_info()
+
+    def prev_camera_fullscreen(self, event=None):
+        if self.num_total_cameras > 1:
+            prev_player = self.active_players[self.fullscreen_camera_index]
+            self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
+            next_player = self.active_players[self.fullscreen_camera_index]
+            
+            prev_player.set_hwnd(0) # Liberar el frame
+            next_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
+            self._update_fullscreen_info()
+
+    # --- Métodos de Ayuda y Gestión ---
     def on_closing(self):
         self.stop_all_streams()
         self.window.destroy()
@@ -217,6 +271,10 @@ class CameraViewerApp:
     def load_urls_from_file(self):
         if not os.path.exists(CONFIG_FILE): return []
         with open(CONFIG_FILE, "r") as f: return [line.strip() for line in f if line.strip()]
+    
+    def save_urls_to_file(self):
+        with open(CONFIG_FILE, "w") as f:
+            for url in self.all_camera_urls: f.write(url + "\n")
     
     def _extract_name_from_url(self, url, default_name="Cámara sin nombre"):
         try:
@@ -243,8 +301,6 @@ class CameraViewerApp:
 # --- Punto de Entrada del Programa ---
 if __name__ == '__main__':
     root = tk.Tk()
-    
     sv_ttk.set_theme("dark")
-    
     root.geometry("1280x720")
     app = CameraViewerApp(root, "Visor de Cámaras con Audio Selectivo")
