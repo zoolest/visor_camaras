@@ -1,5 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN FINAL CON CORRECCIONES DE VISIBILIDAD Y CIERRE ---
+# --- VERSIÓN FINAL CON CORRECCIONES DE BUGS Y NUEVAS CARACTERÍSTICAS ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -13,6 +13,9 @@ import sv_ttk
 CONFIG_FILE = "cameras.txt"
 CAMS_PER_PAGE = 6
 GRID_COLS = 3
+# Añadimos un tamaño base para los frames de video para evitar que colapsen
+CAM_FRAME_WIDTH = 480
+CAM_FRAME_HEIGHT = 270
 # --------------------
 
 # --- CLASE PARA LA VENTANA DE AJUSTES ---
@@ -67,7 +70,6 @@ class CameraViewerApp:
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
         self.true_fullscreen = False
-        
         self.fullscreen_player = None
 
         self.vlc_instance = vlc.Instance("--quiet")
@@ -91,13 +93,20 @@ class CameraViewerApp:
         fullscreen_button_frame = ttk.Frame(self.fullscreen_frame)
         fullscreen_button_frame.pack(pady=10)
 
-        self.back_to_grid_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
-        self.back_to_grid_button.pack(side="left", padx=5)
+        self.fs_back_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
+        self.fs_back_button.pack(side="left", padx=5)
 
-        self.enter_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
-        self.enter_true_fullscreen_button.pack(side="left", padx=5)
+        # NUEVO: Botones de control en la vista de cámara única
+        self.fs_audio_button = ttk.Button(fullscreen_button_frame, text="🔇", width=3, command=self._toggle_fullscreen_audio)
+        self.fs_audio_button.pack(side="left", padx=5)
+        
+        self.fs_reload_button = ttk.Button(fullscreen_button_frame, text="🔄", width=3, command=self._reload_fullscreen_stream)
+        self.fs_reload_button.pack(side="left", padx=5)
 
-        self.exit_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
+        self.fs_enter_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
+        self.fs_enter_true_fullscreen_button.pack(side="left", padx=5)
+
+        self.fs_exit_true_fullscreen_button = ttk.Button(fullscreen_button_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
         
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
@@ -119,9 +128,8 @@ class CameraViewerApp:
         self.page_label.config(text=f"Página {self.current_page + 1} de {self.total_pages}")
         self.prev_button.config(state="normal" if self.current_page > 0 else "disabled")
         self.next_button.config(state="normal" if self.current_page < self.total_pages - 1 else "disabled")
-
-        # --- CORRECCIÓN 1: Restaurar la configuración de la cuadrícula ---
-        # Estas líneas le dicen a la cuadrícula que se expanda para llenar el espacio.
+        
+        # CORRECCIÓN: Asegurar que la cuadrícula se expanda
         for i in range(GRID_COLS): self.grid_frame.grid_columnconfigure(i, weight=1)
         rows_in_page = math.ceil(CAMS_PER_PAGE / GRID_COLS)
         for i in range(rows_in_page): self.grid_frame.grid_rowconfigure(i, weight=1)
@@ -135,7 +143,8 @@ class CameraViewerApp:
             pane = ttk.LabelFrame(self.grid_frame, text="Vacío")
             pane.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
-            video_frame = tk.Frame(pane, bg="black")
+            # CORRECCIÓN: Dar un tamaño mínimo al frame para que no colapse
+            video_frame = tk.Frame(pane, bg="black", width=CAM_FRAME_WIDTH, height=CAM_FRAME_HEIGHT)
             video_frame.pack(fill="both", expand=True)
 
             if global_index < self.num_total_cameras:
@@ -153,6 +162,10 @@ class CameraViewerApp:
                 expand_button = ttk.Button(button_overlay_frame, text="⛶", width=3, command=lambda idx=global_index: self.enter_fullscreen(idx))
                 expand_button.pack(side="left", padx=(5,0))
                 
+                # NUEVO: Botón de recarga en la cuadrícula
+                reload_button = ttk.Button(button_overlay_frame, text="🔄", width=3, command=lambda idx=global_index: self.reload_grid_stream(idx))
+                reload_button.pack(side="left", padx=(5,0))
+
                 pane.bind("<Enter>", lambda e, idx=global_index: self.show_overlay_buttons(idx))
                 pane.bind("<Leave>", lambda e, idx=global_index: self.hide_overlay_buttons(idx))
                 
@@ -193,8 +206,20 @@ class CameraViewerApp:
             if global_index in self.audio_buttons:
                 self.audio_buttons[global_index].config(text="🔊")
 
+    def reload_grid_stream(self, global_index):
+        """Recarga un stream específico en la cuadrícula."""
+        if global_index in self.active_players:
+            self.active_players[global_index].stop()
+            self.active_players[global_index].release()
+            del self.active_players[global_index]
+        
+        url = self.all_camera_urls[global_index]
+        video_frame = self.camera_video_frames[global_index]
+        self.start_stream(global_index, url, video_frame)
+
+    # --- Lógica de Pantalla Completa ---
     def _play_fullscreen(self, global_index):
-        if self.fullscreen_player is not None:
+        if self.fullscreen_player:
             self.fullscreen_player.stop()
             self.fullscreen_player.release()
 
@@ -207,8 +232,20 @@ class CameraViewerApp:
         
         is_audio_active = (self.audio_source_index == global_index)
         self.fullscreen_player.audio_set_mute(not is_audio_active)
+        self.fs_audio_button.config(text="🔊" if is_audio_active else "🔇")
         
         self.fullscreen_player.play()
+    
+    def _toggle_fullscreen_audio(self):
+        if self.fullscreen_camera_index is None: return
+        self.toggle_audio_for_camera(self.fullscreen_camera_index)
+        is_audio_active = (self.audio_source_index == self.fullscreen_camera_index)
+        self.fullscreen_player.audio_set_mute(not is_audio_active)
+        self.fs_audio_button.config(text="🔊" if is_audio_active else "🔇")
+
+    def _reload_fullscreen_stream(self):
+        if self.fullscreen_camera_index is None: return
+        self._play_fullscreen(self.fullscreen_camera_index)
 
     def enter_fullscreen(self, global_index):
         self.fullscreen_mode = True
@@ -229,7 +266,7 @@ class CameraViewerApp:
     def exit_fullscreen(self, event=None):
         if self.true_fullscreen: self.exit_true_fullscreen()
         
-        if self.fullscreen_player is not None:
+        if self.fullscreen_player:
             self.fullscreen_player.stop()
             self.fullscreen_player.release()
             self.fullscreen_player = None
@@ -249,17 +286,21 @@ class CameraViewerApp:
     def enter_true_fullscreen(self, event=None):
         self.true_fullscreen = True
         self.window.attributes('-fullscreen', True)
-        self.back_to_grid_button.pack_forget()
-        self.enter_true_fullscreen_button.pack_forget()
-        self.exit_true_fullscreen_button.pack(side="left", padx=5)
+        self.fs_back_button.pack_forget()
+        self.fs_enter_true_fullscreen_button.pack_forget()
+        self.fs_reload_button.pack_forget()
+        self.fs_audio_button.pack_forget()
+        self.fs_exit_true_fullscreen_button.pack(side="left", padx=5)
         self.fullscreen_video_frame.bind("<Double-1>", self.exit_true_fullscreen)
 
     def exit_true_fullscreen(self, event=None):
         self.true_fullscreen = False
         self.window.attributes('-fullscreen', False)
-        self.exit_true_fullscreen_button.pack_forget()
-        self.back_to_grid_button.pack(side="left", padx=5)
-        self.enter_true_fullscreen_button.pack(side="left", padx=5)
+        self.fs_exit_true_fullscreen_button.pack_forget()
+        self.fs_back_button.pack(side="left", padx=5)
+        self.fs_audio_button.pack(side="left", padx=5)
+        self.fs_reload_button.pack(side="left", padx=5)
+        self.fs_enter_true_fullscreen_button.pack(side="left", padx=5)
         self.fullscreen_video_frame.bind("<Double-1>", self.enter_true_fullscreen)
 
     def handle_escape(self, event=None):
@@ -285,14 +326,13 @@ class CameraViewerApp:
         self._update_fullscreen_info()
         self._play_fullscreen(self.fullscreen_camera_index)
 
-    # --- CORRECCIÓN 2: Métodos de cierre robustos ---
+    # --- Métodos de Ayuda y Gestión ---
     def on_closing(self):
         self.stop_all_streams()
-        # Dar un pequeño margen para que los recursos de VLC se liberen antes de destruir la ventana
         self.window.after(100, self.window.destroy)
 
     def stop_all_streams(self):
-        if self.fullscreen_player is not None:
+        if self.fullscreen_player:
             self.fullscreen_player.stop()
             self.fullscreen_player.release()
             self.fullscreen_player = None
@@ -300,7 +340,6 @@ class CameraViewerApp:
         for player in self.active_players.values():
             player.stop()
             player.release()
-            
         self.active_players.clear()
         self.audio_source_index = None
     
