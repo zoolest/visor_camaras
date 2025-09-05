@@ -1,4 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
+# --- VERSIÓN CORREGIDA CON BOTÓN DE EXPANDIR ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -133,14 +134,21 @@ class CameraViewerApp:
                 url = self.all_camera_urls[global_index]
                 pane.config(text=self._extract_name_from_url(url, default_name=f"Cámara {global_index+1}"))
                 
-                video_frame = tk.Frame(pane, bg="black", cursor="hand2")
+                video_frame = tk.Frame(pane, bg="black")
                 video_frame.grid(row=0, column=0, sticky="nsew")
                 
-                audio_button = ttk.Button(pane, text="🔇", width=3, command=lambda idx=global_index: self.toggle_audio_for_camera(idx))
-                audio_button.place(x=5, y=5, anchor="nw")
+                # --- CAMBIO: Frame para los botones superpuestos ---
+                button_overlay_frame = ttk.Frame(pane)
+                button_overlay_frame.place(x=5, y=5, anchor="nw")
+
+                audio_button = ttk.Button(button_overlay_frame, text="🔇", width=3, command=lambda idx=global_index: self.toggle_audio_for_camera(idx))
+                audio_button.pack(side="left")
                 self.audio_buttons[global_index] = audio_button
                 
-                video_frame.bind("<Double-1>", lambda e, idx=global_index: self.enter_fullscreen(idx))
+                # --- CAMBIO: Botón dedicado para expandir ---
+                expand_button = ttk.Button(button_overlay_frame, text="⛶", width=3, command=lambda idx=global_index: self.enter_fullscreen(idx))
+                expand_button.pack(side="left", padx=(5,0))
+
                 self.start_stream(global_index, url, video_frame)
     
     def start_stream(self, global_index, url, frame_widget):
@@ -239,24 +247,40 @@ class CameraViewerApp:
             self.fullscreen_label.config(text=f"{camera_name} - VISTA COMPLETA")
 
     def next_camera_fullscreen(self, event=None):
-        if self.num_total_cameras > 1:
-            prev_player = self.active_players[self.fullscreen_camera_index]
-            self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
-            next_player = self.active_players[self.fullscreen_camera_index]
-            
-            prev_player.set_hwnd(0) # Liberar el frame
-            next_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
-            self._update_fullscreen_info()
+        if self.num_total_cameras <= 1: return
+        
+        # Encuentra el frame original de la cámara actual para liberar el video
+        current_on_page_index = self.fullscreen_camera_index % CAMS_PER_PAGE
+        current_container = self.grid_frame.winfo_children()[current_on_page_index]
+        current_video_frame = current_container.winfo_children()[0]
+
+        # Liberar el reproductor actual de la vista completa
+        self.active_players[self.fullscreen_camera_index].set_hwnd(current_video_frame.winfo_id())
+        
+        # Cambiar al siguiente índice
+        self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
+        
+        # Asignar el nuevo reproductor a la vista completa
+        self.active_players[self.fullscreen_camera_index].set_hwnd(self.fullscreen_video_frame.winfo_id())
+        self._update_fullscreen_info()
 
     def prev_camera_fullscreen(self, event=None):
-        if self.num_total_cameras > 1:
-            prev_player = self.active_players[self.fullscreen_camera_index]
-            self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
-            next_player = self.active_players[self.fullscreen_camera_index]
-            
-            prev_player.set_hwnd(0) # Liberar el frame
-            next_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
-            self._update_fullscreen_info()
+        if self.num_total_cameras <= 1: return
+
+        # Encuentra el frame original de la cámara actual para liberar el video
+        current_on_page_index = self.fullscreen_camera_index % CAMS_PER_PAGE
+        current_container = self.grid_frame.winfo_children()[current_on_page_index]
+        current_video_frame = current_container.winfo_children()[0]
+
+        # Liberar el reproductor actual
+        self.active_players[self.fullscreen_camera_index].set_hwnd(current_video_frame.winfo_id())
+
+        # Cambiar al índice anterior
+        self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
+        
+        # Asignar el nuevo reproductor a la vista completa
+        self.active_players[self.fullscreen_camera_index].set_hwnd(self.fullscreen_video_frame.winfo_id())
+        self._update_fullscreen_info()
 
     # --- Métodos de Ayuda y Gestión ---
     def on_closing(self):
