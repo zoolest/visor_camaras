@@ -1,5 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN FINAL CON CORRECCIONES DE BUGS Y NUEVAS CARACTERÍSTICAS ---
+# --- VERSIÓN CON CORRECCIONES DE RENDERIZADO DE VIDEO Y LÓGICA DE AUDIO ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -69,8 +69,12 @@ class CameraViewerApp:
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
         self.true_fullscreen = False
+        self.fullscreen_player = None
 
-        self.vlc_instance = vlc.Instance("--quiet")
+        # --- CORRECCIÓN 1: Forzar un módulo de salida de video compatible ---
+        # Esto soluciona el problema del video negro en Windows.
+        # Si 'gl' no funciona, puedes probar con 'direct3d9'.
+        self.vlc_instance = vlc.Instance("--quiet", "--vout=gl")
         
         # --- UI ---
         top_bar = ttk.Frame(self.window); top_bar.pack(side="top", fill="x", padx=10, pady=5)
@@ -93,7 +97,7 @@ class CameraViewerApp:
 
         self.fs_back_button = ttk.Button(fullscreen_button_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
         self.fs_back_button.pack(side="left", padx=5)
-
+        
         self.fs_audio_button = ttk.Button(fullscreen_button_frame, text="🔇", width=3, command=self._toggle_fullscreen_audio)
         self.fs_audio_button.pack(side="left", padx=5)
         
@@ -212,14 +216,14 @@ class CameraViewerApp:
 
     def _toggle_fullscreen_audio(self):
         if self.fullscreen_camera_index is None: return
+        # Esta acción ahora afectará al reproductor de la cuadrícula
         self.toggle_audio_for_camera(self.fullscreen_camera_index)
         is_audio_active = (self.audio_source_index == self.fullscreen_camera_index)
         self.fs_audio_button.config(text="🔊" if is_audio_active else "🔇")
 
     def _reload_fullscreen_stream(self):
         if self.fullscreen_camera_index is None: return
-        # Recargar el stream reutilizando la lógica de cambiar a la misma cámara
-        self.switch_fullscreen_camera(self.fullscreen_camera_index)
+        self.reload_grid_stream(self.fullscreen_camera_index)
 
     def enter_fullscreen(self, global_index):
         self.fullscreen_mode = True
@@ -230,8 +234,9 @@ class CameraViewerApp:
         self.bottom_bar.pack_forget()
         self.fullscreen_frame.pack(fill="both", expand=True)
         
-        player = self.active_players[global_index]
-        self.window.after(30, lambda: player.set_hwnd(self.fullscreen_video_frame.winfo_id()))
+        player = self.active_players.get(global_index)
+        if player:
+            self.window.after(30, lambda: player.set_hwnd(self.fullscreen_video_frame.winfo_id()))
 
         is_audio_active = (self.audio_source_index == global_index)
         self.fs_audio_button.config(text="🔊" if is_audio_active else "🔇")
@@ -289,22 +294,34 @@ class CameraViewerApp:
             camera_name = self._extract_name_from_url(self.all_camera_urls[self.fullscreen_camera_index], default_name=f"CÁMARA {self.fullscreen_camera_index+1}")
             self.fullscreen_label.config(text=f"{camera_name} - VISTA COMPLETA")
 
+    # --- CORRECCIÓN 2: Lógica de cambio de cámara robusta ---
     def switch_fullscreen_camera(self, new_index):
         if self.fullscreen_camera_index is None or self.num_total_cameras <= 1: return
             
+        # Devolver el reproductor actual a su frame original en la cuadrícula (oculta)
         current_player = self.active_players.get(self.fullscreen_camera_index)
         original_frame = self.camera_video_frames.get(self.fullscreen_camera_index)
         if current_player and original_frame:
             current_player.set_hwnd(original_frame.winfo_id())
-            
+            # Sincronizar el audio del reproductor que dejamos
+            is_audio_on = (self.audio_source_index == self.fullscreen_camera_index)
+            current_player.audio_set_mute(not is_audio_on)
+
+        # Actualizar el índice
         self.fullscreen_camera_index = new_index
+        
+        # Asignar el nuevo reproductor al frame de pantalla completa
         next_player = self.active_players.get(self.fullscreen_camera_index)
         if next_player:
             next_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
+            # Sincronizar el audio del nuevo reproductor
+            is_audio_on = (self.audio_source_index == self.fullscreen_camera_index)
+            next_player.audio_set_mute(not is_audio_on)
 
         self._update_fullscreen_info()
-        is_audio_active = (self.audio_source_index == self.fullscreen_camera_index)
-        self.fs_audio_button.config(text="🔊" if is_audio_active else "🔇")
+        # Sincronizar el botón de audio de la UI
+        is_audio_active_now = (self.audio_source_index == self.fullscreen_camera_index)
+        self.fs_audio_button.config(text="🔊" if is_audio_active_now else "🔇")
 
     def next_camera_fullscreen(self, event=None):
         new_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
@@ -314,6 +331,7 @@ class CameraViewerApp:
         new_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
         self.switch_fullscreen_camera(new_index)
 
+    # --- Métodos de Ayuda y Gestión ---
     def on_closing(self):
         self.stop_all_streams()
         self.window.after(100, self.window.destroy)
