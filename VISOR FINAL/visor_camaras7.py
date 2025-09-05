@@ -1,5 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN CON OPTIMIZACIÓN DE STREAMS Y CORRECCIÓN DE NAVEGACIÓN ---
+# --- VERSIÓN CON CONTROLES EN LA PARTE SUPERIOR ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -59,6 +59,7 @@ class CameraViewerApp:
         
         self.active_players = {}
         self.audio_buttons = {}
+        self.camera_video_frames = {}
         self.overlay_buttons = {}
         self.num_total_cameras = len(self.all_camera_urls)
         
@@ -85,13 +86,18 @@ class CameraViewerApp:
         self.next_button = ttk.Button(self.bottom_bar, text="Siguiente >>", command=self.next_page); self.next_button.pack(side="right")
         
         self.fullscreen_frame = ttk.Frame(self.window)
-        self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold")); self.fullscreen_label.pack(pady=(5,0))
-        self.fullscreen_video_frame = tk.Frame(self.fullscreen_frame, bg="black")
-        self.fullscreen_video_frame.pack(fill="both", expand=True)
+        self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold"))
         
         self.fs_controls_frame = ttk.Frame(self.fullscreen_frame)
-        self.fs_controls_frame.pack(pady=5)
-
+        
+        self.fullscreen_video_frame = tk.Frame(self.fullscreen_frame, bg="black")
+        
+        # --- CAMBIO: Cambiar el orden de empaquetado ---
+        self.fullscreen_label.pack(pady=(5,0))
+        self.fs_controls_frame.pack(pady=5) # <-- Controles ahora van aquí
+        self.fullscreen_video_frame.pack(fill="both", expand=True) # <-- Video llena el resto
+        
+        # --- El resto de la configuración de los botones ---
         self.fs_back_button = ttk.Button(self.fs_controls_frame, text="Volver a la Cuadrícula", command=self.exit_fullscreen)
         self.fs_back_button.pack(side="left", padx=5)
         
@@ -104,6 +110,9 @@ class CameraViewerApp:
         self.fs_enter_true_fullscreen_button = ttk.Button(self.fs_controls_frame, text="Pantalla Completa", command=self.enter_true_fullscreen)
         self.fs_enter_true_fullscreen_button.pack(side="left", padx=5)
 
+        # Este botón se crea pero no se empaqueta, aparecerá solo en modo pantalla completa real
+        self.fs_exit_true_fullscreen_button = ttk.Button(self.fs_controls_frame, text="Salir de Pantalla Completa", command=self.exit_true_fullscreen)
+        
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
         self.window.mainloop()
@@ -114,6 +123,7 @@ class CameraViewerApp:
         
         self.audio_buttons.clear()
         self.overlay_buttons.clear()
+        self.camera_video_frames.clear()
 
         self.num_total_cameras = len(self.all_camera_urls)
         self.total_pages = math.ceil(self.num_total_cameras / CAMS_PER_PAGE) if self.num_total_cameras > 0 else 1
@@ -143,6 +153,7 @@ class CameraViewerApp:
             if global_index < self.num_total_cameras:
                 url = self.all_camera_urls[global_index]
                 pane.config(text=self._extract_name_from_url(url, default_name=f"Cámara {global_index+1}"))
+                self.camera_video_frames[global_index] = video_frame
                 
                 button_overlay_frame = ttk.Frame(pane)
                 self.overlay_buttons[global_index] = button_overlay_frame
@@ -173,12 +184,9 @@ class CameraViewerApp:
     def start_stream(self, global_index, url, frame_widget, use_substream=False):
         if global_index in self.active_players: return
 
-        # MEJORA: Decidir si usar el stream principal o secundario
         stream_url = url
         if use_substream:
-            # Esta es una suposición común, puede necesitar ajuste para tus cámaras
             stream_url = url.replace("stream1", "stream2")
-            print(f"Usando substream para cámara {global_index}: {stream_url}")
 
         player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(stream_url)
@@ -219,10 +227,7 @@ class CameraViewerApp:
             self.fullscreen_player.stop()
             self.fullscreen_player.release()
 
-        # En pantalla completa siempre usamos el stream principal (stream1)
         url = self.all_camera_urls[global_index]
-        print(f"Usando stream principal para vista completa: {url}")
-
         self.fullscreen_player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(url)
         media.add_option(':rtsp-tcp')
@@ -284,25 +289,10 @@ class CameraViewerApp:
         self.window.unbind("<Right>")
         self.window.unbind("<Left>")
         
-        self.update_page_view() # Recarga la vista de cuadrícula
+        self.update_page_view()
         self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
 
-    def enter_true_fullscreen(self, event=None):
-        self.true_fullscreen = True
-        self.window.attributes('-fullscreen', True)
-        self.fs_controls_frame.pack_forget()
-        self.window.bind("<Motion>", self._show_fullscreen_controls)
-
-    def exit_true_fullscreen(self, event=None):
-        self.true_fullscreen = False
-        self.window.attributes('-fullscreen', False)
-        if self.hide_controls_job:
-            self.window.after_cancel(self.hide_controls_job)
-            self.hide_controls_job = None
-        self.fs_controls_frame.pack(pady=5)
-        self.window.unbind("<Motion>")
-        
     def _show_fullscreen_controls(self, event=None):
         self.fs_controls_frame.pack(pady=5)
         if self.hide_controls_job:
@@ -312,6 +302,21 @@ class CameraViewerApp:
     def _hide_fullscreen_controls(self):
         self.fs_controls_frame.pack_forget()
 
+    def enter_true_fullscreen(self, event=None):
+        self.true_fullscreen = True
+        self.window.attributes('-fullscreen', True)
+        self._hide_fullscreen_controls()
+        self.window.bind("<Motion>", self._show_fullscreen_controls)
+
+    def exit_true_fullscreen(self, event=None):
+        self.true_fullscreen = False
+        self.window.attributes('-fullscreen', False)
+        if self.hide_controls_job:
+            self.window.after_cancel(self.hide_controls_job)
+            self.hide_controls_job = None
+        self._show_fullscreen_controls()
+        self.window.unbind("<Motion>")
+        
     def handle_escape(self, event=None):
         if self.true_fullscreen:
             self.exit_true_fullscreen()
@@ -323,7 +328,6 @@ class CameraViewerApp:
             camera_name = self._extract_name_from_url(self.all_camera_urls[self.fullscreen_camera_index], default_name=f"CÁMARA {self.fullscreen_camera_index+1}")
             self.fullscreen_label.config(text=f"{camera_name} - VISTA COMPLETA")
 
-    # --- CORRECCIÓN 2: Lógica de cambio de cámara simplificada y robusta ---
     def next_camera_fullscreen(self, event=None):
         if self.num_total_cameras <= 1: return
         self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
