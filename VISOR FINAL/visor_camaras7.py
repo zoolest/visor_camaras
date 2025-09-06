@@ -1,4 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
+# --- VERSIÓN FINAL CON CORRECCIÓN DE BÚFER DE RED ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -176,6 +177,8 @@ class CameraViewerApp:
         player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(stream_url)
         media.add_option(':rtsp-tcp')
+        # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
+        media.add_option(':network-caching=1500')
         player.set_media(media)
         player.set_hwnd(frame_widget.winfo_id())
         player.audio_set_mute(True)
@@ -193,9 +196,7 @@ class CameraViewerApp:
         self.start_stream(global_index, url, video_frame, use_substream=True)
         self._sync_all_audio_states()
 
-    # --- Lógica de Audio Centralizada ---
     def _sync_all_audio_states(self):
-        """Sincroniza el audio de TODOS los reproductores con la fuente de verdad."""
         for idx, player in self.active_players.items():
             is_active = (idx == self.audio_source_index)
             player.audio_set_mute(not is_active)
@@ -208,7 +209,6 @@ class CameraViewerApp:
             self.fs_audio_button_top.config(text="🔊" if is_active else "🔇")
 
     def toggle_audio_source(self, new_source_index):
-        """Punto de control único para cambiar la fuente de audio."""
         if self.audio_source_index == new_source_index:
             self.audio_source_index = None
         else:
@@ -216,7 +216,8 @@ class CameraViewerApp:
         self._sync_all_audio_states()
     
     def _toggle_fullscreen_audio(self):
-        self.toggle_audio_source(self.fullscreen_camera_index)
+        if self.fullscreen_camera_index is not None:
+            self.toggle_audio_source(self.fullscreen_camera_index)
     
     def _play_fullscreen(self, global_index):
         if self.fullscreen_player:
@@ -227,6 +228,8 @@ class CameraViewerApp:
         self.fullscreen_player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(url)
         media.add_option(':rtsp-tcp')
+        # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
+        media.add_option(':network-caching=1500')
         self.fullscreen_player.set_media(media)
         self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
         

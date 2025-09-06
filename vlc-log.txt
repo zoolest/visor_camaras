@@ -1,0 +1,42 @@
+﻿-- logger module started --
+main debug: VLC media player - 3.0.16 Vetinari
+main debug: Copyright © 1996-2021 the VideoLAN team
+main debug: revision 3.0.16-0-g5e70837d8d
+main debug: configured with /home/jenkins/workspace/vlc-release/windows/vlc-release-win32-x64/extras/package/win32/../../../configure  '--enable-update-check' '--enable-lua' '--enable-faad' '--enable-flac' '--enable-theora' '--enable-avcodec' '--enable-merge-ffmpeg' '--enable-dca' '--enable-mpc' '--enable-libass' '--enable-schroedinger' '--enable-realrtsp' '--enable-live555' '--enable-shout' '--enable-goom' '--enable-sse' '--enable-mmx' '--enable-libcddb' '--enable-zvbi' '--disable-telx' '--enable-nls' '--host=x86_64-w64-mingw32' '--with-contrib=../contrib/x86_64-w64-mingw32' '--with-breakpad=https://win.crashes.videolan.org' '--enable-qt' '--enable-skins2' '--enable-dvdread' '--enable-caca' 'host_alias=x86_64-w64-mingw32' 'CFLAGS= ' 'CXXFLAGS= ' 'PKG_CONFIG=pkg-config' 'PKG_CONFIG_LIBDIR=/usr/x86_64-w64-mingw32/lib/pkgconfig:/usr/lib/x86_64-w64-mingw32/pkgconfig'
+main debug: using multimedia timers as clock source
+main debug:  min period: 1 ms, max period: 1000000 ms
+main debug: searching plug-in modules
+main debug: loading plugins cache file C:\Program Files\VideoLAN\VLC\plugins\plugins.dat
+main debug: recursively browsing `C:\Program Files\VideoLAN\VLC\plugins'
+main debug: plug-ins loaded: 496 modules
+main debug: looking for logger module matching "any": 2 candidates
+file debug: opening logfile `vlc-log.txt'
+main debug: using logger module "file"
+main debug: translation test: code is "C"
+main debug: looking for keystore module matching "memory": 3 candidates
+main debug: using keystore module "memory"
+main debug: CPU has capabilities MMX MMXEXT SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 FPU 
+main debug: creating audio output
+main debug: looking for audio output module matching "any": 6 candidates
+mmdevice debug: using default device
+mmdevice debug: version 2 session control unavailable
+mmdevice debug: volume from -65.250000 dB to +0.000000 dB with 0.031250 dB increments
+main debug: using audio output module "mmdevice"
+main debug: keeping audio output
+main debug: Creating an input for preparsing 'vlc'
+main debug: looking for meta fetcher module matching "any": 1 candidates
+lua debug: Trying Lua scripts in C:\Users\inthe\AppData\Roaming\vlc\lua\meta\fetcher
+lua debug: Trying Lua scripts in C:\Program Files\VideoLAN\VLC\lua\meta\fetcher
+main debug: no meta fetcher modules matched
+main debug: looking for art finder module matching "any": 2 candidates
+lua debug: Trying Lua scripts in C:\Users\inthe\AppData\Roaming\vlc\lua\meta\art
+lua debug: Trying Lua scripts in C:\Program Files\VideoLAN\VLC\lua\meta\art
+lua debug: Trying Lua playlist script C:\Program Files\VideoLAN\VLC\lua\meta\art\00_musicbrainz.luac
+lua debug: skipping script (unmatched scope) C:\Program Files\VideoLAN\VLC\lua\meta\art\00_musicbrainz.luac
+lua debug: Trying Lua playlist script C:\Program Files\VideoLAN\VLC\lua\meta\art\01_googleimage.luac
+lua debug: skipping script (unmatched scope) C:\Program Files\VideoLAN\VLC\lua\meta\art\01_googleimage.luac
+lua debug: Trying Lua playlist script C:\Program Files\VideoLAN\VLC\lua\meta\art\02_frenchtv.luac
+lua debug: skipping script (unmatched scope) C:\Program Files\VideoLAN\VLC\lua\meta\art\02_frenchtv.luac
+lua debug: Trying Lua playlist script C:\Program Files\VideoLAN\VLC\lua\meta\art\03_lastfm.luac
+lua debug: skipping script (unmatched scope) C:\Program Files\VideoLAN\VLC\lua\meta\art\03_lastfm.luac
+main debug: no art finder modules matched
