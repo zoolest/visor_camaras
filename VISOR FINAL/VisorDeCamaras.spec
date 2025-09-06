@@ -5,12 +5,8 @@ a = Analysis(
     ['visor_camaras7.py'],
     pathex=[],
     binaries=[],
-    datas=[
-    ('/home/salvador/Documentos/ProyectoCamaras/.venv/lib/python3.12/site-packages/cv2', 'cv2'),
-    ('/home/salvador/Documentos/ProyectoCamaras/.venv/lib/python3.12/site-packages/PIL', 'PIL'),
-],
-
-    hiddenimports=['cv2', 'sv_ttk', 'PIL.ImageTk'],
+    datas=[('cameras.txt', '.')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -1,5 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN FINAL CON CORRECCIÓN DE BÚFER DE RED ---
+# --- VERSIÓN FINAL CON CORRECCIÓN DE BÚFER DE RED AUMENTADO ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -178,7 +178,7 @@ class CameraViewerApp:
         media = self.vlc_instance.media_new(stream_url)
         media.add_option(':rtsp-tcp')
         # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
-        media.add_option(':network-caching=1500')
+        media.add_option(':network-caching=3000') # VALOR AUMENTADO
         player.set_media(media)
         player.set_hwnd(frame_widget.winfo_id())
         player.audio_set_mute(True)
@@ -229,7 +229,7 @@ class CameraViewerApp:
         media = self.vlc_instance.media_new(url)
         media.add_option(':rtsp-tcp')
         # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
-        media.add_option(':network-caching=1500')
+        media.add_option(':network-caching=3000') # VALOR AUMENTADO
         self.fullscreen_player.set_media(media)
         self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
         
