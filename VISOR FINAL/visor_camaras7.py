@@ -1,5 +1,4 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN CON LÓGICA DE AUDIO CENTRALIZADA Y CORREGIDA ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -159,7 +158,7 @@ class CameraViewerApp:
                 
                 self.start_stream(global_index, url, video_frame, use_substream=True)
         
-        self._sync_all_audio_states() # Sincronizar audio después de crear los reproductores
+        self._sync_all_audio_states()
 
     def show_overlay_buttons(self, global_index):
         if global_index in self.overlay_buttons:
@@ -196,7 +195,7 @@ class CameraViewerApp:
 
     # --- Lógica de Audio Centralizada ---
     def _sync_all_audio_states(self):
-        """Sincroniza el audio de TODOS los reproductores (cuadrícula y completo) con la fuente de verdad."""
+        """Sincroniza el audio de TODOS los reproductores con la fuente de verdad."""
         for idx, player in self.active_players.items():
             is_active = (idx == self.audio_source_index)
             player.audio_set_mute(not is_active)
@@ -217,7 +216,6 @@ class CameraViewerApp:
         self._sync_all_audio_states()
     
     def _toggle_fullscreen_audio(self):
-        """El botón de audio de la vista completa llama al controlador principal."""
         self.toggle_audio_source(self.fullscreen_camera_index)
     
     def _play_fullscreen(self, global_index):
@@ -236,8 +234,8 @@ class CameraViewerApp:
         self.fullscreen_player.play()
     
     def _reload_fullscreen_stream(self):
-        if self.fullscreen_camera_index is None: return
-        self._play_fullscreen(self.fullscreen_camera_index)
+        if self.fullscreen_camera_index is not None:
+            self._play_fullscreen(self.fullscreen_camera_index)
 
     def enter_fullscreen(self, global_index):
         if global_index in self.active_players:
@@ -323,14 +321,12 @@ class CameraViewerApp:
         self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
         self._update_fullscreen_info()
         self._play_fullscreen(self.fullscreen_camera_index)
-        self._sync_all_audio_states()
 
     def prev_camera_fullscreen(self, event=None):
         if self.num_total_cameras <= 1: return
         self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
         self._update_fullscreen_info()
         self._play_fullscreen(self.fullscreen_camera_index)
-        self._sync_all_audio_states()
 
     def on_closing(self):
         self.stop_all_streams()
