@@ -158,6 +158,8 @@ class CameraViewerApp:
                 pane.bind("<Leave>", lambda e, idx=global_index: self.hide_overlay_buttons(idx))
                 
                 self.start_stream(global_index, url, video_frame, use_substream=True)
+        
+        self._sync_all_audio_states() # Sincronizar audio después de crear los reproductores
 
     def show_overlay_buttons(self, global_index):
         if global_index in self.overlay_buttons:
@@ -190,18 +192,17 @@ class CameraViewerApp:
         url = self.all_camera_urls[global_index]
         video_frame = self.overlay_buttons[global_index].master.winfo_children()[0]
         self.start_stream(global_index, url, video_frame, use_substream=True)
+        self._sync_all_audio_states()
 
-    # --- CORRECCIÓN: Lógica de Audio Centralizada ---
+    # --- Lógica de Audio Centralizada ---
     def _sync_all_audio_states(self):
         """Sincroniza el audio de TODOS los reproductores (cuadrícula y completo) con la fuente de verdad."""
-        # Sincronizar reproductores de la cuadrícula
         for idx, player in self.active_players.items():
             is_active = (idx == self.audio_source_index)
             player.audio_set_mute(not is_active)
             if idx in self.audio_buttons:
                 self.audio_buttons[idx].config(text="🔊" if is_active else "🔇")
 
-        # Sincronizar reproductor de pantalla completa
         if self.fullscreen_player and self.fullscreen_mode:
             is_active = (self.fullscreen_camera_index == self.audio_source_index)
             self.fullscreen_player.audio_set_mute(not is_active)
@@ -210,10 +211,9 @@ class CameraViewerApp:
     def toggle_audio_source(self, new_source_index):
         """Punto de control único para cambiar la fuente de audio."""
         if self.audio_source_index == new_source_index:
-            self.audio_source_index = None # Si se hace clic en el mismo, se apaga
+            self.audio_source_index = None
         else:
             self.audio_source_index = new_source_index
-        
         self._sync_all_audio_states()
     
     def _toggle_fullscreen_audio(self):
@@ -232,7 +232,7 @@ class CameraViewerApp:
         self.fullscreen_player.set_media(media)
         self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
         
-        self._sync_all_audio_states() # Asegura que el audio esté correcto al iniciar
+        self._sync_all_audio_states()
         self.fullscreen_player.play()
     
     def _reload_fullscreen_stream(self):
@@ -282,9 +282,6 @@ class CameraViewerApp:
         self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
         
-        # Sincronizar audio al volver a la cuadrícula
-        self._sync_all_audio_states()
-
     def _show_fs_exit_button(self, event=None):
         self.fs_exit_hover_button.place(relx=0.5, rely=1.0, x=0, y=-10, anchor="s")
         if self.hide_controls_job:
@@ -326,12 +323,14 @@ class CameraViewerApp:
         self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
         self._update_fullscreen_info()
         self._play_fullscreen(self.fullscreen_camera_index)
+        self._sync_all_audio_states()
 
     def prev_camera_fullscreen(self, event=None):
         if self.num_total_cameras <= 1: return
         self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
         self._update_fullscreen_info()
         self._play_fullscreen(self.fullscreen_camera_index)
+        self._sync_all_audio_states()
 
     def on_closing(self):
         self.stop_all_streams()
