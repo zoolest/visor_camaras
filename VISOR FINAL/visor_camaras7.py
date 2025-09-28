@@ -1,4 +1,5 @@
-# --- VISOR MULTI-CÁMARA CON OPENCV Y ESTADOS MEJORADOS (SIN AUDIO) ---
+# --- VISOR MULTI-CÁMARA CON OPENCV (VERSIÓN FINAL ESTABLE SIN AUDIO) ---
+# --- VERSIÓN CON CORRECCIÓN DE ASPECTO Y OPTIMIZACIÓN DE RENDIMIENTO ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -11,12 +12,13 @@ import time
 from urllib.parse import urlparse
 import sv_ttk
 
+# --- FORZAR TCP PARA UNA CONEXIÓN RTSP RÁPIDA ---
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
 # --- CONFIGURACIÓN GLOBAL ---
 CONFIG_FILE = "cameras.txt"
 CAMS_PER_PAGE = 6
 GRID_COLS = 3
-CAM_FRAME_WIDTH = 480
-CAM_FRAME_HEIGHT = 270
 # --------------------
 
 # --- CLASE PARA LA VENTANA DE AJUSTES ---
@@ -94,14 +96,14 @@ class CameraViewerApp:
         self.fullscreen_frame = ttk.Frame(self.window)
         self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold")); self.fullscreen_label.pack(pady=(5,0))
         self.fullscreen_canvas = tk.Canvas(self.fullscreen_frame, bg="black")
-        self.fullscreen_video_frame = self.fullscreen_canvas
-        self.fullscreen_video_frame.pack(fill="both", expand=True)
+        self.fullscreen_canvas.pack(fill="both", expand=True)
         
-        self.fs_exit_hover_button = ttk.Button(self.fullscreen_video_frame, text="Salir de Pantalla Completa (Esc)", command=self.exit_true_fullscreen)
+        self.fs_exit_hover_button = ttk.Button(self.fullscreen_canvas, text="Salir de Pantalla Completa (Esc)", command=self.exit_true_fullscreen)
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
-        self.delay = 40 # ms, ~25 FPS
+        # --- CAMBIO: Reducir tasa de refresco para bajar uso de CPU ---
+        self.delay = 100 # ms, 10 FPS
         self.update_gui_frames()
         self.check_streams_health()
         self.window.mainloop()
@@ -147,7 +149,7 @@ class CameraViewerApp:
             pane = ttk.LabelFrame(self.grid_frame, text="Vacío")
             pane.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
-            canvas = tk.Canvas(pane, bg="black", width=CAM_FRAME_WIDTH, height=CAM_FRAME_HEIGHT)
+            canvas = tk.Canvas(pane, bg="black")
             canvas.pack(fill="both", expand=True)
             self.camera_canvases.append(canvas)
 
@@ -177,12 +179,9 @@ class CameraViewerApp:
         if global_index in self.overlay_buttons:
             self.overlay_buttons[global_index].place_forget()
 
-    # --- CAMBIO: Lógica de inicio de stream con estados ---
     def start_stream(self, global_index, url):
         if url and global_index not in self.active_streams:
             self.latest_frames[global_index] = ("connecting", None)
-            
-            # Iniciar la conexión en un hilo para no bloquear la UI
             threading.Thread(target=self._stream_worker, args=(global_index, url), daemon=True).start()
 
     def _stream_worker(self, global_index, url):
@@ -221,57 +220,59 @@ class CameraViewerApp:
         url = self.all_camera_urls[global_index]
         self.start_stream(global_index, url)
 
-    # --- CAMBIO: Lógica de actualización de UI con estados ---
     def update_gui_frames(self):
-        if self.fullscreen_mode:
-            state_info = self.latest_frames.get(self.fullscreen_camera_index)
-            canvas = self.fullscreen_canvas
+        # Unificar la lógica de dibujado en una función auxiliar
+        def draw_frame(canvas, frame_data):
             canvas.delete("all")
-            
-            if state_info:
-                status, data = state_info
+            canvas_w = canvas.winfo_width()
+            canvas_h = canvas.winfo_height()
+
+            if canvas_w <= 1 or canvas_h <= 1: return # No dibujar si el canvas no es visible
+
+            if frame_data:
+                status, data = frame_data
                 if status == "playing":
                     h, w, _ = data.shape
-                    canvas_w, canvas_h = canvas.winfo_width(), canvas.winfo_height()
-                    if canvas_w > 1 and canvas_h > 1:
-                        scale = min(canvas_w / w, canvas_h / h)
-                        new_w, new_h = int(w * scale), int(h * scale)
-                        frame_resized = cv2.resize(data, (new_w, new_h))
-                        photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)))
-                        canvas.create_image(canvas_w / 2, canvas_h / 2, image=photo)
-                        canvas.image = photo
-                else: # 'connecting', 'no_signal', 'error'
-                    if canvas.winfo_width() > 1:
-                        canvas.create_text(canvas.winfo_width() // 2, canvas.winfo_height() // 2, text=data or status.replace("_", " ").title(), fill="white", font=("Helvetica", 24))
+                    # --- CAMBIO: Lógica de letterboxing para TODAS las vistas ---
+                    scale = min(canvas_w / w, canvas_h / h)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    
+                    frame_resized = cv2.resize(data, (new_w, new_h))
+                    frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                    
+                    img_pil = Image.fromarray(frame_rgb)
+                    bg_image = Image.new('RGB', (canvas_w, canvas_h), 'black')
+                    offset = ((canvas_w - new_w) // 2, (canvas_h - new_h) // 2)
+                    bg_image.paste(img_pil, offset)
+                    
+                    photo = ImageTk.PhotoImage(image=bg_image)
+                    canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+                    canvas.image = photo
+                elif status == "error":
+                    canvas.create_text(canvas_w / 2, canvas_h / 2, text=data, fill="#E57373", font=("Helvetica", 16))
+                else: # 'connecting', 'no_signal'
+                    canvas.create_text(canvas_w / 2, canvas_h / 2, text=status.replace("_", " ").title(), fill="white", font=("Helvetica", 16))
+            else: # Si no hay state_info (poco probable pero seguro)
+                canvas.create_text(canvas_w / 2, canvas_h / 2, text="Iniciando...", fill="white", font=("Helvetica", 16))
+
+        if self.fullscreen_mode:
+            state_info = self.latest_frames.get(self.fullscreen_camera_index)
+            draw_frame(self.fullscreen_canvas, state_info)
         else:
             for i, canvas in enumerate(self.camera_canvases):
                 global_index = self.current_page * CAMS_PER_PAGE + i
                 if global_index < self.num_total_cameras:
                     state_info = self.latest_frames.get(global_index)
-                    canvas.delete("all")
-                    if state_info:
-                        status, data = state_info
-                        if status == "playing":
-                            frame_resized = cv2.resize(data, (CAM_FRAME_WIDTH, CAM_FRAME_HEIGHT))
-                            photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)))
-                            canvas.create_image(0, 0, image=photo, anchor=tk.NW)
-                            canvas.image = photo
-                        elif status == "error":
-                            canvas.create_text(CAM_FRAME_WIDTH/2, CAM_FRAME_HEIGHT/2, text=data, fill="red", font=("Helvetica", 16))
-                        else: # 'connecting', 'no_signal'
-                             canvas.create_text(CAM_FRAME_WIDTH/2, CAM_FRAME_HEIGHT/2, text=status.replace("_", " ").title(), fill="white", font=("Helvetica", 16))
+                    draw_frame(canvas, state_info)
 
         if self.running:
             self.window.after(self.delay, self.update_gui_frames)
 
     def _reload_fullscreen_stream(self):
-        # La recarga en fullscreen la maneja el vigilante al volver a la cuadrícula,
-        # pero podemos forzar una recarga en el stream de la cuadrícula
         if self.fullscreen_camera_index is not None:
             self.reload_grid_stream(self.fullscreen_camera_index)
 
     def enter_fullscreen(self, global_index):
-        # En esta versión, la vista completa simplemente muestra el stream que ya está corriendo
         self.fullscreen_mode = True
         self.fullscreen_camera_index = global_index
         self._update_fullscreen_info()
