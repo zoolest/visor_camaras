@@ -1,12 +1,14 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN FINAL Y ESTABLE ---
+# --- VERSIÓN CON CORRECCIÓN DE CONGELAMIENTO (Threading en Recarga) ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import vlc
 import os
 import math
+import time
 from urllib.parse import urlparse
+import threading
 import sv_ttk
 
 # --- CONFIGURACIÓN GLOBAL ---
@@ -72,7 +74,6 @@ class CameraViewerApp:
         self.hide_controls_job = None
         self.running = True
 
-        # --- CORRECCIÓN: Dejar que VLC elija el mejor motor de video ---
         self.vlc_instance = vlc.Instance("--quiet")
         
         # --- UI ---
@@ -105,7 +106,7 @@ class CameraViewerApp:
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
-        self.check_streams_health() # Iniciar el vigilante
+        self.check_streams_health()
         self.window.mainloop()
 
     def check_streams_health(self):
@@ -134,7 +135,6 @@ class CameraViewerApp:
 
         self.num_total_cameras = len(self.all_camera_urls)
         self.total_pages = math.ceil(self.num_total_cameras / CAMS_PER_PAGE) if self.num_total_cameras > 0 else 1
-        
         self.current_page = max(0, min(self.current_page, self.total_pages - 1))
 
         self.page_label.config(text=f"Página {self.current_page + 1} de {self.total_pages}")
@@ -202,27 +202,37 @@ class CameraViewerApp:
         player.play()
         self.active_players[global_index] = player
 
+    # --- CORRECCIÓN: Funciones de recarga ahora se ejecutan en segundo plano ---
     def reload_grid_stream(self, global_index):
-        if global_index not in self.overlay_buttons: return
+        def _reload_task():
+            if global_index not in self.overlay_buttons: return
+            if global_index in self.active_players:
+                self.active_players[global_index].stop()
+                self.active_players[global_index].release()
+                del self.active_players[global_index]
+            
+            url = self.all_camera_urls[global_index]
+            video_frame = self.overlay_buttons[global_index].master.winfo_children()[0]
+            self.start_stream(global_index, url, video_frame, use_substream=True)
+            self._sync_all_audio_states()
         
-        if global_index in self.active_players:
-            self.active_players[global_index].stop()
-            self.active_players[global_index].release()
-            del self.active_players[global_index]
+        threading.Thread(target=_reload_task, daemon=True).start()
+
+    def _reload_fullscreen_stream(self):
+        def _reload_task():
+            if self.fullscreen_camera_index is not None:
+                self._play_fullscreen(self.fullscreen_camera_index)
         
-        url = self.all_camera_urls[global_index]
-        video_frame = self.overlay_buttons[global_index].master.winfo_children()[0]
-        self.start_stream(global_index, url, video_frame, use_substream=True)
-        self._sync_all_audio_states()
+        threading.Thread(target=_reload_task, daemon=True).start()
 
     def _sync_all_audio_states(self):
         for idx, player in self.active_players.items():
             is_active = (idx == self.audio_source_index)
-            player.audio_set_mute(not is_active)
+            if player.is_playing(): player.audio_set_mute(not is_active)
             if idx in self.audio_buttons:
                 self.audio_buttons[idx].config(text="🔊" if is_active else "🔇")
 
-        if self.fullscreen_player and self.fullscreen_mode:
+        if self.fullscreen_player and self.fullscreen_mode and self.fullscreen_player.is_playing():
             is_active = (self.fullscreen_camera_index == self.audio_source_index)
             self.fullscreen_player.audio_set_mute(not is_active)
             self.fs_audio_button_top.config(text="🔊" if is_active else "🔇")
@@ -248,14 +258,9 @@ class CameraViewerApp:
         media.add_option(':network-caching=1500')
         self.fullscreen_player.set_media(media)
         self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
-        
         self._sync_all_audio_states()
         self.fullscreen_player.play()
     
-    def _reload_fullscreen_stream(self):
-        if self.fullscreen_camera_index is not None:
-            self._play_fullscreen(self.fullscreen_camera_index)
-
     def enter_fullscreen(self, global_index):
         if global_index in self.active_players:
             self.active_players[global_index].stop()
