@@ -1,14 +1,14 @@
-# --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN CON CORRECCIÓN DE CONGELAMIENTO (Threading en Recarga) ---
+# --- VISOR MULTI-CÁMARA CON OPENCV Y ESTADOS MEJORADOS (SIN AUDIO) ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-import vlc
+import cv2
+import threading
+from PIL import Image, ImageTk
 import os
 import math
 import time
 from urllib.parse import urlparse
-import threading
 import sv_ttk
 
 # --- CONFIGURACIÓN GLOBAL ---
@@ -59,38 +59,32 @@ class CameraViewerApp:
         
         self.all_camera_urls = self.load_urls_from_file()
         
-        self.active_players = {}
-        self.audio_buttons = {}
+        self.active_streams = {}
+        self.latest_frames = {}
         self.overlay_buttons = {}
+        self.last_frame_time = {}
         self.num_total_cameras = len(self.all_camera_urls)
         
-        self.audio_source_index = None
         self.current_page = 0
         self.total_pages = 0
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
         self.true_fullscreen = False
-        self.fullscreen_player = None
         self.hide_controls_job = None
         self.running = True
 
-        self.vlc_instance = vlc.Instance("--quiet")
-        
         # --- UI ---
         self.top_bar = ttk.Frame(self.window)
         self.top_bar.pack(side="top", fill="x", padx=10, pady=5)
         ttk.Button(self.top_bar, text="Administrar Cámaras", command=self.open_settings).pack(side="left")
 
         self.fullscreen_controls_top = ttk.Frame(self.top_bar)
-        
         ttk.Button(self.fullscreen_controls_top, text="Volver a la Cuadrícula", command=self.exit_fullscreen).pack(side="right", padx=(5,0))
         ttk.Button(self.fullscreen_controls_top, text="Pantalla Completa", command=self.enter_true_fullscreen).pack(side="right", padx=(5,0))
-        self.fs_reload_button_top = ttk.Button(self.fullscreen_controls_top, text="🔄", width=3, command=self._reload_fullscreen_stream)
-        self.fs_reload_button_top.pack(side="right", padx=(5,0))
-        self.fs_audio_button_top = ttk.Button(self.fullscreen_controls_top, text="🔇", width=3, command=self._toggle_fullscreen_audio)
-        self.fs_audio_button_top.pack(side="right", padx=(5,0))
+        ttk.Button(self.fullscreen_controls_top, text="🔄 Recargar", width=10, command=self._reload_fullscreen_stream).pack(side="right", padx=(5,0))
         
         self.grid_frame = ttk.Frame(self.window); self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.camera_canvases = []
         
         self.bottom_bar = ttk.Frame(self.window); self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
         self.prev_button = ttk.Button(self.bottom_bar, text="<< Anterior", command=self.prev_page); self.prev_button.pack(side="left")
@@ -99,38 +93,37 @@ class CameraViewerApp:
         
         self.fullscreen_frame = ttk.Frame(self.window)
         self.fullscreen_label = ttk.Label(self.fullscreen_frame, text="", font=("Helvetica", 14, "bold")); self.fullscreen_label.pack(pady=(5,0))
-        self.fullscreen_video_frame = tk.Frame(self.fullscreen_frame, bg="black")
+        self.fullscreen_canvas = tk.Canvas(self.fullscreen_frame, bg="black")
+        self.fullscreen_video_frame = self.fullscreen_canvas
         self.fullscreen_video_frame.pack(fill="both", expand=True)
         
         self.fs_exit_hover_button = ttk.Button(self.fullscreen_video_frame, text="Salir de Pantalla Completa (Esc)", command=self.exit_true_fullscreen)
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
+        self.delay = 40 # ms, ~25 FPS
+        self.update_gui_frames()
         self.check_streams_health()
         self.window.mainloop()
 
     def check_streams_health(self):
-        if not self.running: return
+        if not self.running or self.fullscreen_mode:
+            self.window.after(10000, self.check_streams_health)
+            return
 
-        for index, player in list(self.active_players.items()):
-            state = player.get_state()
-            if state in {vlc.State.Ended, vlc.State.Error, vlc.State.Stopped}:
-                print(f"Stream de cámara {index} caído (estado: {state}). Reiniciando...")
+        for index in list(self.active_streams.keys()):
+            last_time = self.last_frame_time.get(index, 0)
+            if time.time() - last_time > 15:
+                print(f"Stream de cámara {index} parece congelado. Reiniciando...")
                 self.reload_grid_stream(index)
-
-        if self.fullscreen_player and self.fullscreen_mode:
-            state = self.fullscreen_player.get_state()
-            if state in {vlc.State.Ended, vlc.State.Error, vlc.State.Stopped}:
-                print(f"Stream de pantalla completa caído (estado: {state}). Reiniciando...")
-                self._reload_fullscreen_stream()
-
-        self.window.after(15000, self.check_streams_health)
+        
+        self.window.after(10000, self.check_streams_health)
 
     def update_page_view(self):
-        self.stop_all_streams()
+        self.stop_all_active_streams()
         for widget in self.grid_frame.winfo_children(): widget.destroy()
         
-        self.audio_buttons.clear()
+        self.camera_canvases = []
         self.overlay_buttons.clear()
 
         self.num_total_cameras = len(self.all_camera_urls)
@@ -154,8 +147,9 @@ class CameraViewerApp:
             pane = ttk.LabelFrame(self.grid_frame, text="Vacío")
             pane.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
             
-            video_frame = tk.Frame(pane, bg="black", width=CAM_FRAME_WIDTH, height=CAM_FRAME_HEIGHT)
-            video_frame.pack(fill="both", expand=True)
+            canvas = tk.Canvas(pane, bg="black", width=CAM_FRAME_WIDTH, height=CAM_FRAME_HEIGHT)
+            canvas.pack(fill="both", expand=True)
+            self.camera_canvases.append(canvas)
 
             if global_index < self.num_total_cameras:
                 url = self.all_camera_urls[global_index]
@@ -163,10 +157,6 @@ class CameraViewerApp:
                 
                 button_overlay_frame = ttk.Frame(pane)
                 self.overlay_buttons[global_index] = button_overlay_frame
-
-                audio_button = ttk.Button(button_overlay_frame, text="🔇", width=3, command=lambda idx=global_index: self.toggle_audio_source(idx))
-                audio_button.pack(side="left")
-                self.audio_buttons[global_index] = audio_button
                 
                 expand_button = ttk.Button(button_overlay_frame, text="⛶", width=3, command=lambda idx=global_index: self.enter_fullscreen(idx))
                 expand_button.pack(side="left", padx=(5,0))
@@ -177,9 +167,7 @@ class CameraViewerApp:
                 pane.bind("<Enter>", lambda e, idx=global_index: self.show_overlay_buttons(idx))
                 pane.bind("<Leave>", lambda e, idx=global_index: self.hide_overlay_buttons(idx))
                 
-                self.start_stream(global_index, url, video_frame, use_substream=True)
-        
-        self._sync_all_audio_states()
+                self.start_stream(global_index, url)
 
     def show_overlay_buttons(self, global_index):
         if global_index in self.overlay_buttons:
@@ -189,84 +177,101 @@ class CameraViewerApp:
         if global_index in self.overlay_buttons:
             self.overlay_buttons[global_index].place_forget()
 
-    def start_stream(self, global_index, url, frame_widget, use_substream=False):
-        if global_index in self.active_players: return
-        stream_url = url.replace("stream1", "stream2") if use_substream else url
-        player = self.vlc_instance.media_player_new()
-        media = self.vlc_instance.media_new(stream_url)
-        media.add_option(':rtsp-tcp')
-        media.add_option(':network-caching=1500')
-        player.set_media(media)
-        player.set_hwnd(frame_widget.winfo_id())
-        player.audio_set_mute(True)
-        player.play()
-        self.active_players[global_index] = player
-
-    # --- CORRECCIÓN: Funciones de recarga ahora se ejecutan en segundo plano ---
-    def reload_grid_stream(self, global_index):
-        def _reload_task():
-            if global_index not in self.overlay_buttons: return
-            if global_index in self.active_players:
-                self.active_players[global_index].stop()
-                self.active_players[global_index].release()
-                del self.active_players[global_index]
+    # --- CAMBIO: Lógica de inicio de stream con estados ---
+    def start_stream(self, global_index, url):
+        if url and global_index not in self.active_streams:
+            self.latest_frames[global_index] = ("connecting", None)
             
-            url = self.all_camera_urls[global_index]
-            video_frame = self.overlay_buttons[global_index].master.winfo_children()[0]
-            self.start_stream(global_index, url, video_frame, use_substream=True)
-            self._sync_all_audio_states()
+            # Iniciar la conexión en un hilo para no bloquear la UI
+            threading.Thread(target=self._stream_worker, args=(global_index, url), daemon=True).start()
+
+    def _stream_worker(self, global_index, url):
+        stream_url = url.replace("stream1", "stream2")
+        cap = cv2.VideoCapture(stream_url)
         
-        threading.Thread(target=_reload_task, daemon=True).start()
+        if not cap.isOpened():
+            self.latest_frames[global_index] = ("error", "Error de Conexión")
+            return
+
+        flag = [True]
+        thread = threading.Thread(target=self.read_frames, args=(cap, global_index, flag), daemon=True)
+        self.active_streams[global_index] = (thread, cap, flag)
+        self.last_frame_time[global_index] = time.time()
+        thread.start()
+
+    def read_frames(self, cap, global_index, running_flag):
+        while running_flag[0]:
+            ret, frame = cap.read()
+            if ret:
+                self.latest_frames[global_index] = ("playing", frame)
+                self.last_frame_time[global_index] = time.time()
+            else:
+                self.latest_frames[global_index] = ("no_signal", None)
+                time.sleep(1)
+        cap.release()
+
+    def reload_grid_stream(self, global_index):
+        if global_index in self.active_streams:
+            thread, _, flag = self.active_streams[global_index]
+            flag[0] = False
+            thread.join(timeout=1.0)
+            del self.active_streams[global_index]
+        
+        self.last_frame_time.pop(global_index, None)
+        url = self.all_camera_urls[global_index]
+        self.start_stream(global_index, url)
+
+    # --- CAMBIO: Lógica de actualización de UI con estados ---
+    def update_gui_frames(self):
+        if self.fullscreen_mode:
+            state_info = self.latest_frames.get(self.fullscreen_camera_index)
+            canvas = self.fullscreen_canvas
+            canvas.delete("all")
+            
+            if state_info:
+                status, data = state_info
+                if status == "playing":
+                    h, w, _ = data.shape
+                    canvas_w, canvas_h = canvas.winfo_width(), canvas.winfo_height()
+                    if canvas_w > 1 and canvas_h > 1:
+                        scale = min(canvas_w / w, canvas_h / h)
+                        new_w, new_h = int(w * scale), int(h * scale)
+                        frame_resized = cv2.resize(data, (new_w, new_h))
+                        photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)))
+                        canvas.create_image(canvas_w / 2, canvas_h / 2, image=photo)
+                        canvas.image = photo
+                else: # 'connecting', 'no_signal', 'error'
+                    if canvas.winfo_width() > 1:
+                        canvas.create_text(canvas.winfo_width() // 2, canvas.winfo_height() // 2, text=data or status.replace("_", " ").title(), fill="white", font=("Helvetica", 24))
+        else:
+            for i, canvas in enumerate(self.camera_canvases):
+                global_index = self.current_page * CAMS_PER_PAGE + i
+                if global_index < self.num_total_cameras:
+                    state_info = self.latest_frames.get(global_index)
+                    canvas.delete("all")
+                    if state_info:
+                        status, data = state_info
+                        if status == "playing":
+                            frame_resized = cv2.resize(data, (CAM_FRAME_WIDTH, CAM_FRAME_HEIGHT))
+                            photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)))
+                            canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+                            canvas.image = photo
+                        elif status == "error":
+                            canvas.create_text(CAM_FRAME_WIDTH/2, CAM_FRAME_HEIGHT/2, text=data, fill="red", font=("Helvetica", 16))
+                        else: # 'connecting', 'no_signal'
+                             canvas.create_text(CAM_FRAME_WIDTH/2, CAM_FRAME_HEIGHT/2, text=status.replace("_", " ").title(), fill="white", font=("Helvetica", 16))
+
+        if self.running:
+            self.window.after(self.delay, self.update_gui_frames)
 
     def _reload_fullscreen_stream(self):
-        def _reload_task():
-            if self.fullscreen_camera_index is not None:
-                self._play_fullscreen(self.fullscreen_camera_index)
-        
-        threading.Thread(target=_reload_task, daemon=True).start()
-
-    def _sync_all_audio_states(self):
-        for idx, player in self.active_players.items():
-            is_active = (idx == self.audio_source_index)
-            if player.is_playing(): player.audio_set_mute(not is_active)
-            if idx in self.audio_buttons:
-                self.audio_buttons[idx].config(text="🔊" if is_active else "🔇")
-
-        if self.fullscreen_player and self.fullscreen_mode and self.fullscreen_player.is_playing():
-            is_active = (self.fullscreen_camera_index == self.audio_source_index)
-            self.fullscreen_player.audio_set_mute(not is_active)
-            self.fs_audio_button_top.config(text="🔊" if is_active else "🔇")
-
-    def toggle_audio_source(self, new_source_index):
-        if self.audio_source_index == new_source_index: self.audio_source_index = None
-        else: self.audio_source_index = new_source_index
-        self._sync_all_audio_states()
-    
-    def _toggle_fullscreen_audio(self):
+        # La recarga en fullscreen la maneja el vigilante al volver a la cuadrícula,
+        # pero podemos forzar una recarga en el stream de la cuadrícula
         if self.fullscreen_camera_index is not None:
-            self.toggle_audio_source(self.fullscreen_camera_index)
-    
-    def _play_fullscreen(self, global_index):
-        if self.fullscreen_player:
-            self.fullscreen_player.stop()
-            self.fullscreen_player.release()
+            self.reload_grid_stream(self.fullscreen_camera_index)
 
-        url = self.all_camera_urls[global_index]
-        self.fullscreen_player = self.vlc_instance.media_player_new()
-        media = self.vlc_instance.media_new(url)
-        media.add_option(':rtsp-tcp')
-        media.add_option(':network-caching=1500')
-        self.fullscreen_player.set_media(media)
-        self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
-        self._sync_all_audio_states()
-        self.fullscreen_player.play()
-    
     def enter_fullscreen(self, global_index):
-        if global_index in self.active_players:
-            self.active_players[global_index].stop()
-            self.active_players[global_index].release()
-            del self.active_players[global_index]
-            
+        # En esta versión, la vista completa simplemente muestra el stream que ya está corriendo
         self.fullscreen_mode = True
         self.fullscreen_camera_index = global_index
         self._update_fullscreen_info()
@@ -276,19 +281,12 @@ class CameraViewerApp:
         self.fullscreen_frame.pack(fill="both", expand=True)
         self.fullscreen_controls_top.pack(side="right", padx=5)
         
-        self._play_fullscreen(global_index)
-        
         self.window.bind("<Escape>", self.handle_escape)
         self.window.bind("<Right>", self.next_camera_fullscreen)
         self.window.bind("<Left>", self.prev_camera_fullscreen)
 
     def exit_fullscreen(self, event=None):
         if self.true_fullscreen: self.exit_true_fullscreen()
-        
-        if self.fullscreen_player:
-            self.fullscreen_player.stop()
-            self.fullscreen_player.release()
-            self.fullscreen_player = None
         
         self.fullscreen_mode = False
         self.fullscreen_camera_index = None
@@ -300,7 +298,6 @@ class CameraViewerApp:
         self.window.unbind("<Right>")
         self.window.unbind("<Left>")
         
-        self.update_page_view()
         self.grid_frame.pack(fill="both", expand=True, padx=10, pady=10)
         self.bottom_bar.pack(side="bottom", fill="x", padx=10, pady=10)
         
@@ -344,45 +341,37 @@ class CameraViewerApp:
         if self.num_total_cameras <= 1: return
         self.fullscreen_camera_index = (self.fullscreen_camera_index + 1) % self.num_total_cameras
         self._update_fullscreen_info()
-        self._play_fullscreen(self.fullscreen_camera_index)
 
     def prev_camera_fullscreen(self, event=None):
         if self.num_total_cameras <= 1: return
         self.fullscreen_camera_index = (self.fullscreen_camera_index - 1 + self.num_total_cameras) % self.num_total_cameras
         self._update_fullscreen_info()
-        self._play_fullscreen(self.fullscreen_camera_index)
 
     def on_closing(self):
         self.running = False
-        self.stop_all_streams()
+        self.stop_all_active_streams()
         self.window.after(100, self.window.destroy)
 
-    def stop_all_streams(self):
-        if self.fullscreen_player:
-            self.fullscreen_player.stop()
-            self.fullscreen_player.release()
-            self.fullscreen_player = None
-        for player in self.active_players.values():
-            player.stop()
-            player.release()
-        self.active_players.clear()
-        self.audio_source_index = None
+    def stop_all_active_streams(self):
+        for _, (thread, _, flag) in list(self.active_streams.items()):
+            flag[0] = False
+            thread.join(timeout=1.0)
+        self.active_streams.clear()
+        self.latest_frames.clear()
+        self.last_frame_time.clear()
     
     def load_urls_from_file(self):
         if not os.path.exists(CONFIG_FILE): return []
         with open(CONFIG_FILE, "r") as f: return [line.strip() for line in f if line.strip()]
-    
     def save_urls_to_file(self):
         with open(CONFIG_FILE, "w") as f:
             for url in self.all_camera_urls: f.write(url + "\n")
-    
     def _extract_name_from_url(self, url, default_name="Cámara sin nombre"):
         try:
             parsed_url = urlparse(url)
             return parsed_url.username or parsed_url.hostname or default_name
         except Exception:
             return default_name
-
     def open_settings(self):
         if self.fullscreen_mode: self.exit_fullscreen()
         dialog = SettingsDialog(self.window, self.all_camera_urls)
@@ -391,10 +380,8 @@ class CameraViewerApp:
             self.save_urls_to_file()
             self.current_page = 0
             self.update_page_view()
-
     def next_page(self):
         if self.current_page < self.total_pages - 1: self.current_page += 1; self.update_page_view()
-
     def prev_page(self):
         if self.current_page > 0: self.current_page -= 1; self.update_page_view()
 
@@ -406,4 +393,4 @@ if __name__ == '__main__':
     if os.name == 'nt':
         root.wm_attributes("-transparentcolor", "white")
         
-    app = CameraViewerApp(root, "Visor de Cámaras con Audio Selectivo")
+    app = CameraViewerApp(root, "Visor de Cámaras Avanzado (OpenCV)")
