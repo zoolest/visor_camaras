@@ -1,5 +1,5 @@
 # --- VISOR MULTI-CÁMARA CON AUDIO Y NAVEGACIÓN COMPLETA (VLC) ---
-# --- VERSIÓN FINAL CON CORRECCIÓN DE BÚFER DE RED AUMENTADO ---
+# --- VERSIÓN FINAL Y ESTABLE ---
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -70,8 +70,10 @@ class CameraViewerApp:
         self.true_fullscreen = False
         self.fullscreen_player = None
         self.hide_controls_job = None
+        self.running = True
 
-        self.vlc_instance = vlc.Instance("--quiet", "--vout=gl")
+        # --- CORRECCIÓN: Dejar que VLC elija el mejor motor de video ---
+        self.vlc_instance = vlc.Instance("--quiet")
         
         # --- UI ---
         self.top_bar = ttk.Frame(self.window)
@@ -103,7 +105,25 @@ class CameraViewerApp:
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.update_page_view()
+        self.check_streams_health() # Iniciar el vigilante
         self.window.mainloop()
+
+    def check_streams_health(self):
+        if not self.running: return
+
+        for index, player in list(self.active_players.items()):
+            state = player.get_state()
+            if state in {vlc.State.Ended, vlc.State.Error, vlc.State.Stopped}:
+                print(f"Stream de cámara {index} caído (estado: {state}). Reiniciando...")
+                self.reload_grid_stream(index)
+
+        if self.fullscreen_player and self.fullscreen_mode:
+            state = self.fullscreen_player.get_state()
+            if state in {vlc.State.Ended, vlc.State.Error, vlc.State.Stopped}:
+                print(f"Stream de pantalla completa caído (estado: {state}). Reiniciando...")
+                self._reload_fullscreen_stream()
+
+        self.window.after(15000, self.check_streams_health)
 
     def update_page_view(self):
         self.stop_all_streams()
@@ -171,14 +191,11 @@ class CameraViewerApp:
 
     def start_stream(self, global_index, url, frame_widget, use_substream=False):
         if global_index in self.active_players: return
-
         stream_url = url.replace("stream1", "stream2") if use_substream else url
-
         player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(stream_url)
         media.add_option(':rtsp-tcp')
-        # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
-        media.add_option(':network-caching=3000') # VALOR AUMENTADO
+        media.add_option(':network-caching=1500')
         player.set_media(media)
         player.set_hwnd(frame_widget.winfo_id())
         player.audio_set_mute(True)
@@ -186,6 +203,8 @@ class CameraViewerApp:
         self.active_players[global_index] = player
 
     def reload_grid_stream(self, global_index):
+        if global_index not in self.overlay_buttons: return
+        
         if global_index in self.active_players:
             self.active_players[global_index].stop()
             self.active_players[global_index].release()
@@ -209,10 +228,8 @@ class CameraViewerApp:
             self.fs_audio_button_top.config(text="🔊" if is_active else "🔇")
 
     def toggle_audio_source(self, new_source_index):
-        if self.audio_source_index == new_source_index:
-            self.audio_source_index = None
-        else:
-            self.audio_source_index = new_source_index
+        if self.audio_source_index == new_source_index: self.audio_source_index = None
+        else: self.audio_source_index = new_source_index
         self._sync_all_audio_states()
     
     def _toggle_fullscreen_audio(self):
@@ -228,8 +245,7 @@ class CameraViewerApp:
         self.fullscreen_player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(url)
         media.add_option(':rtsp-tcp')
-        # --- LÍNEA CLAVE PARA SOLUCIONAR ERRORES DE BÚFER Y AUDIO ---
-        media.add_option(':network-caching=3000') # VALOR AUMENTADO
+        media.add_option(':network-caching=1500')
         self.fullscreen_player.set_media(media)
         self.fullscreen_player.set_hwnd(self.fullscreen_video_frame.winfo_id())
         
@@ -332,6 +348,7 @@ class CameraViewerApp:
         self._play_fullscreen(self.fullscreen_camera_index)
 
     def on_closing(self):
+        self.running = False
         self.stop_all_streams()
         self.window.after(100, self.window.destroy)
 
@@ -381,4 +398,7 @@ if __name__ == '__main__':
     root = tk.Tk()
     sv_ttk.set_theme("dark")
     root.geometry("1280x720")
+    if os.name == 'nt':
+        root.wm_attributes("-transparentcolor", "white")
+        
     app = CameraViewerApp(root, "Visor de Cámaras con Audio Selectivo")
